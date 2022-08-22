@@ -33,10 +33,12 @@ import {setupStats} from './stats_panel';
 import {setBackendAndEnvFlags} from './util';
 import {showImage} from './image';
 
-let detector, camera, stats;
+let detector, camera, stats, distance_score_header;
+let image_poses, camera_poses;
 let startInferenceTime, numInferences = 0;
 let inferenceTimeSum = 0, lastPanelUpdate = 0;
 let rafId;
+const consine_similarity = require('compute-cosine-similarity');
 
 async function createDetector() {
   switch (STATE.model) {
@@ -134,7 +136,28 @@ function endEstimatePosesStats() {
   }
 }
 
-async function renderResult() {
+async function predictImagePoses() {
+  let poses = null;
+
+  // Detector can be null if initialization failed (for example when loading
+  // from a URL that does not exist).
+  if (detector != null) {
+    // Detectors can throw errors, for example when using custom URLs that
+    // contain a model that doesn't provide the expected output.
+    try {
+      poses = await detector.estimatePoses(
+          photo_image,
+          {maxPoses: STATE.modelConfig.maxPoses, flipHorizontal: false});
+    } catch (error) {
+      detector.dispose();
+      detector = null;
+      alert(error);
+    }
+  }
+  return poses;
+}
+
+async function predictCameraPoses() {
   if (camera.video.readyState < 2) {
     await new Promise((resolve) => {
       camera.video.onloadeddata = () => {
@@ -165,9 +188,12 @@ async function renderResult() {
 
     endEstimatePosesStats();
   }
+  return poses;
+}
 
+async function updateWindow(poses, distance) {
+  distance_score_header.innerText = "Distance = " + distance;
   camera.drawCtx();
-
   // The null check makes sure the UI is not in the middle of changing to a
   // different model. If during model change, the result is from an old model,
   // which shouldn't be rendered.
@@ -176,12 +202,95 @@ async function renderResult() {
   }
 }
 
+async function convertPoseToVector(pose) {
+  var vector = [];
+  var confidence_score = [];
+  var norm = 0;
+  var sum_of_confidence_score = 0;
+  var keypoints = pose[0]["keypoints"];
+  var array_length = keypoints.length;
+  for (var i = 0; i < array_length; i++) {
+    vector.push(keypoints[i]["x"]);
+    vector.push(keypoints[i]["y"]);
+    norm += keypoints[i]["x"]*keypoints[i]["x"];
+    norm += keypoints[i]["y"]*keypoints[i]["y"];
+    confidence_score.push(keypoints[i]["score"]);
+    sum_of_confidence_score += keypoints[i]["score"];
+  }
+  norm = Math.sqrt(norm);
+  for (var i = 0; i < vector.length; i++) {
+    vector[i] /= norm;
+  }
+  return [vector, confidence_score, sum_of_confidence_score, confidence_score.length];
+}
+
+async function calculateConsineDistance(poseVector1, poseVector2) {
+  let cosineSimilarity = consine_similarity(poseVector1, poseVector2);
+  let distance = 2 * (1 - cosineSimilarity);
+  return Math.sqrt(distance);
+}
+
+async function calculateWeightedDistance(poseVector1, poseVector2, num_of_body_part) {
+  // poseVector1 and poseVector2 are 52-float vectors composed of:
+  // Values 0-33: are x,y coordinates for 17 body parts in alphabetical order
+  // Values 34-51: are confidence values for each of the 17 body parts in alphabetical order
+  // Value 51: A sum of all the confidence values
+  // Again the lower the number, the closer the distance
+
+  if (!poseVector1) {
+    console.log("calculate NULL");
+    return 0;
+  }
+  let vector1PoseXY = poseVector1.slice(0, 2*num_of_body_part);
+  let vector1Confidences = poseVector1.slice(2*num_of_body_part, 3*num_of_body_part);
+  let vector1ConfidenceSum = poseVector1.slice(3*num_of_body_part, 3*num_of_body_part+1);
+
+  let vector2PoseXY = poseVector2.slice(0, 2*num_of_body_part);
+
+  // First summation
+  let summation1 = 1 / vector1ConfidenceSum;
+
+  // Second summation
+  let summation2 = 0;
+  for (let i = 0; i < vector1PoseXY.length; i++) {
+    let tempConf = Math.floor(i / 2);
+    let tempSum = vector1Confidences[tempConf] * Math.abs(vector1PoseXY[i] - vector2PoseXY[i]);
+    summation2 = summation2 + tempSum;
+  }
+
+  return summation1 * summation2;
+}
+
 async function renderPrediction() {
   await checkGuiUpdate();
 
-  if (!STATE.isModelChanged) {
-    await renderResult();
+  if (STATE.isImageChanged) {
+    image_poses = await predictImagePoses();
+    STATE.isImageChanged = false;
   }
+  if (!STATE.isModelChanged) {
+    camera_poses = await predictCameraPoses();
+  }
+
+  if (image_poses && camera_poses) {
+    var image_result = await convertPoseToVector(image_poses);
+    var camera_result = await convertPoseToVector(camera_poses);
+
+    // // Weighed distance
+    // var image_vector = image_result[0].concat(image_result[1]).concat(image_result[2]);
+    // var camera_vector = camera_result[0].concat(camera_result[1]).concat(camera_result[2]);
+    // var num_of_body_part = image_result[3];
+    // var distance = await calculateWeightedDistance(image_vector, camera_vector, num_of_body_part);
+
+    // Consine distance
+    var image_vector = image_result[0];
+    var camera_vector = camera_result[0];
+    var distance = await calculateConsineDistance(image_vector, camera_vector);
+  } else {
+    var distance = "NaN";
+  }
+
+  await updateWindow(camera_poses, distance);
 
   rafId = requestAnimationFrame(renderPrediction);
 };
@@ -206,9 +315,11 @@ async function app() {
 
   renderPrediction();
 
+  const photo_src = document.getElementById("photo_src");
+  const photo_image = document.getElementById("photo_image");
+  distance_score_header = document.getElementById("distance_score_header");
+  
+  showImage(photo_src, photo_image);
 };
 
-var src = document.getElementById("src");
-var target = document.getElementById("target");
-showImage(src, target);
 app();

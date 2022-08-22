@@ -48,6 +48,7 @@ limitations under the License.
 <body>
   <div id="stats"></div>
   <div id="main">
+    <h2 id="distance_score_header">Distance, the lower the better</h2>
     <div class="container">
       <div class="column">
         <div class="canvas-wrapper">
@@ -63,9 +64,8 @@ limitations under the License.
         </div>
       </div>
       <div class="column">
-          <input id="src" type="file"/> <!-- input you want to read from (src) -->
-          <!-- <img id="target" width="auto" height="auto"/> &#60;&#33;&#45;&#45; image you want to display it (target) &#45;&#45;&#62; -->
-          <img id="target" src="./TAI_0328.JPG"/> <!-- image you want to display it (target) -->
+          <input id="photo_src" type="file"/>
+          <img id="photo_image">
       </div>
       <div id="scatter-gl-container"></div>
     </div>
