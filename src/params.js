@@ -29,7 +29,8 @@ export const STATE = {
   camera: {targetFPS: 60, sizeOption: '640 X 480'},
   backend: '',
   flags: {},
-  modelConfig: {}
+  modelConfig: {},
+  isImageChanged: true
 };
 export const BLAZEPOSE_CONFIG = {
   maxPoses: 1,

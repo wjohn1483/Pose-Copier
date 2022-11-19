@@ -318,7 +318,7 @@ async function app() {
   const photo_src = document.getElementById("photo_src");
   const photo_image = document.getElementById("photo_image");
   distance_score_header = document.getElementById("distance_score_header");
-  
+
   showImage(photo_src, photo_image);
 };
 
